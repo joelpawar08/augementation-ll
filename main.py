@@ -51,7 +51,7 @@ def save_image(image, save_path):
         st.error(f"Error saving image: {e}")
         return False
 
-def augment_with_albumentations(image, save_dir, prefix="alb", num_augs=5):
+def augment_with_albumentations(image, save_dir, prefix="alb", selected_augs=None):
     """Apply augmentations using Albumentations library"""
     if isinstance(image, Image.Image):
         image_np = np.array(image)
@@ -65,43 +65,44 @@ def augment_with_albumentations(image, save_dir, prefix="alb", num_augs=5):
         
     image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
     
-    augmentations = [
-        ("rotate", A.Rotate(limit=45, p=1.0)),
-        ("horizontal_flip", A.HorizontalFlip(p=1.0)),
-        ("vertical_flip", A.VerticalFlip(p=1.0)),
-        ("gauss_noise", A.GaussNoise(p=1.0)),
-        ("random_gamma", A.RandomGamma(p=1.0)),
-        ("blur", A.Blur(blur_limit=9, p=1.0)),
-        ("random_scale", A.RandomScale(scale_limit=0.3, p=1.0)),
-        ("shift_scale_rotate", A.ShiftScaleRotate(p=1.0)),
-        ("random_rain", A.RandomRain(p=1.0)),
-        ("random_fog", A.RandomFog(p=1.0)),
-        ("random_sunflare", A.RandomSunFlare(p=1.0)),
-        ("random_shadow", A.RandomShadow(p=1.0)),
-        ("elastic_transform", A.ElasticTransform(alpha=1, sigma=20, alpha_affine=20, p=1.0)),
-        ("grid_distortion", A.GridDistortion(p=1.0)),
-        ("clahe", A.CLAHE(clip_limit=2.0, tile_grid_size=(4, 4), p=1.0)),
-    ]
+    augmentations = {
+        "rotate": A.Rotate(limit=45, p=1.0),
+        "horizontal_flip": A.HorizontalFlip(p=1.0),
+        "vertical_flip": A.VerticalFlip(p=1.0),
+        "gauss_noise": A.GaussNoise(p=1.0),
+        "random_gamma": A.RandomGamma(p=1.0),
+        "blur": A.Blur(blur_limit=9, p=1.0),
+        "random_scale": A.RandomScale(scale_limit=0.3, p=1.0),
+        "shift_scale_rotate": A.ShiftScaleRotate(p=1.0),
+        "random_rain": A.RandomRain(p=1.0),
+        "random_fog": A.RandomFog(p=1.0),
+        "random_sunflare": A.RandomSunFlare(p=1.0),
+        "random_shadow": A.RandomShadow(p=1.0),
+        "elastic_transform": A.ElasticTransform(alpha=1, sigma=20, alpha_affine=20, p=1.0),
+        "grid_distortion": A.GridDistortion(p=1.0),
+        "clahe": A.CLAHE(clip_limit=2.0, tile_grid_size=(4, 4), p=1.0),
+    }
     
     augmented_images = []
-    selected_augs = random.sample(augmentations, min(num_augs, len(augmentations)))
-    
-    for name, transform in selected_augs:
-        try:
-            augmented = transform(image=image_cv)['image']
-            augmented_rgb = cv2.cvtColor(augmented, cv2.COLOR_BGR2RGB)
-            
-            unique_id = random.randint(10, 999999)
-            save_path = os.path.join(save_dir, f'{prefix}_{name}_{unique_id}.jpg')
-            
-            cv2.imwrite(save_path, cv2.cvtColor(augmented_rgb, cv2.COLOR_RGB2BGR))
-            augmented_images.append((name, augmented_rgb, save_path))
-        except Exception as e:
-            st.warning(f"Skipping albumentations {name}: {str(e)}")
+    if selected_augs:
+        for name in selected_augs:
+            if name in augmentations:
+                try:
+                    transform = augmentations[name]
+                    augmented = transform(image=image_cv)['image']
+                    augmented_rgb = cv2.cvtColor(augmented, cv2.COLOR_BGR2RGB)
+                    
+                    unique_id = random.randint(10, 999999)
+                    save_path = os.path.join(save_dir, f'{prefix}_{name}_{unique_id}.jpg')
+                    
+                    cv2.imwrite(save_path, cv2.cvtColor(augmented_rgb, cv2.COLOR_RGB2BGR))
+                    augmented_images.append((name, augmented_rgb, save_path))
+                except Exception as e:
+                    st.warning(f"Skipping albumentations {name}: {str(e)}")
     
     return augmented_images
 
-def augment_with_keras(image, save_dir, prefix="keras", num_augs=5):
+def augment_with_keras(image, save_dir, prefix="keras", num_augs=5, selected_augs=None):
     """Apply augmentations using Keras ImageDataGenerator"""
     try:
         if isinstance(image, Image.Image):
@@ -118,18 +119,31 @@ def augment_with_keras(image, save_dir, prefix="keras", num_augs=5):
 
         x = np.expand_dims(img_array, axis=0)
 
+        datagen_params = {}
+        if selected_augs:
+            if "keras_rotation" in selected_augs:
+                datagen_params["rotation_range"] = 40
+            if "keras_width_shift" in selected_augs:
+                datagen_params["width_shift_range"] = 0.2
+            if "keras_height_shift" in selected_augs:
+                datagen_params["height_shift_range"] = 0.2
+            if "keras_shear" in selected_augs:
+                datagen_params["shear_range"] = 0.2
+            if "keras_zoom" in selected_augs:
+                datagen_params["zoom_range"] = 0.2
+            if "keras_horizontal_flip" in selected_augs:
+                datagen_params["horizontal_flip"] = True
+            if "keras_brightness" in selected_augs:
+                datagen_params["brightness_range"] = [0.8, 1.2]
+            if "keras_channel_shift" in selected_augs:
+                datagen_params["channel_shift_range"] = 20.0
+            if "keras_vertical_flip" in selected_augs:
+                datagen_params["vertical_flip"] = True
+
         datagen = ImageDataGenerator(
-            rotation_range=40,
-            width_shift_range=0.2,
-            height_shift_range=0.2,
-            shear_range=0.2,
-            zoom_range=0.2,
-            horizontal_flip=True,
-            brightness_range=[0.8, 1.2],
             fill_mode='nearest',
-            channel_shift_range=20.0,
             validation_split=0.2,
-            vertical_flip=True
+            **datagen_params
         )
 
         augmented_images = []
@@ -268,7 +282,7 @@ def compress_jpeg(image, quality_range=(10, 30)):
     buffer.seek(0)
     return Image.open(buffer)
 
-def apply_custom_augmentations(image, save_dir, prefix="custom", num_augs=5):
+def apply_custom_augmentations(image, save_dir, prefix="custom", selected_augs=None):
     """Apply custom augmentations"""
     augmented_images = []
     
@@ -326,41 +340,36 @@ def apply_custom_augmentations(image, save_dir, prefix="custom", num_augs=5):
         "fog": lambda img: (add_fog(img), "cv"),
         "rain": lambda img: (add_rain(img), "cv"),
         "snow": lambda img: (add_snow(img), "cv"),
-    }
-
-    special_functions = {
-        "shear": lambda: Image.fromarray(cv2.cvtColor(
-            np.array(random_shear(np.array(pil_image), intensity=random.uniform(0.2, 0.5), 
+        "shear": lambda img: (Image.fromarray(cv2.cvtColor(
+            np.array(random_shear(np.array(img), intensity=random.uniform(0.2, 0.5), 
                                 row_axis=0, col_axis=1, channel_axis=2)), 
-            cv2.COLOR_BGR2RGB)),
-        "random_erase": lambda: Image.fromarray(random_erase(np.array(pil_image))),
-        "cutout": lambda: Image.fromarray(cutout(np.array(pil_image))),
-        "sunflare": lambda: Image.fromarray(add_sunflare(np.array(pil_image)))
+            cv2.COLOR_BGR2RGB)), "pil"),
+        "random_erase": lambda img: (Image.fromarray(random_erase(np.array(img))), "pil"),
+        "cutout": lambda img: (Image.fromarray(cutout(np.array(img))), "pil"),
+        "sunflare": lambda img: (Image.fromarray(add_sunflare(np.array(img))), "pil")
     }
 
-    all_augs = list(augmentation_functions.items()) + list(special_functions.items())
-    selected_augs = random.sample(all_augs, min(num_augs, len(all_augs)))
-
-    for aug_name, aug_func in selected_augs:
-        try:
-            if aug_name in special_functions:
-                aug_result = aug_func()
-                aug_result_np = np.array(aug_result)
-            else:
-                img_to_use = pil_image if aug_func("dummy")[1] == "pil" else cv_image
-                aug_result, _ = aug_func(img_to_use)
-                if _ == "cv":
-                    aug_result = Image.fromarray(cv2.cvtColor(aug_result, cv2.COLOR_BGR2RGB))
-                aug_result_np = np.array(aug_result)
-                
-            unique_id = random.randint(100000, 999999)
-            save_path = os.path.join(save_dir, f"{prefix}_{aug_name}_{unique_id}.jpg")
-            
-            aug_result.save(save_path)
-            augmented_images.append((aug_name, aug_result_np, save_path))
-            
-        except Exception as e:
-            st.warning(f"Skipping {aug_name}: {str(e)}")
+    augmented_images = []
+    if selected_augs:
+        for aug_name in selected_augs:
+            if aug_name in augmentation_functions:
+                try:
+                    aug_func = augmentation_functions[aug_name]
+                    img_to_use = pil_image if aug_func("dummy")[1] == "pil" else cv_image
+                    aug_result, _ = aug_func(img_to_use if _ == "cv" else pil_image)
+                    
+                    if _ == "cv":
+                        aug_result = Image.fromarray(cv2.cvtColor(aug_result, cv2.COLOR_BGR2RGB))
+                        
+                    unique_id = random.randint(100000, 999999)
+                    save_path = os.path.join(save_dir, f"{prefix}_{aug_name}_{unique_id}.jpg")
+                    
+                    aug_result.save(save_path)
+                    aug_result_np = np.array(aug_result)
+                    augmented_images.append((aug_name, aug_result_np, save_path))
+                    
+                except Exception as e:
+                    st.warning(f"Skipping {aug_name}: {str(e)}")
     
     return augmented_images
 
@@ -378,44 +387,116 @@ def create_zip_from_folder(folder_path, zip_name="augmented_images.zip"):
 
 def main():
     st.set_page_config(page_title="Advanced Image Augmentation Tool", layout="wide")
-    st.title("🖼️ Advanced Image Augmentation Tool")
-    st.write("Upload an image directly or provide image URLs for comprehensive augmentation")
     
-    tab1, tab2 = st.tabs(["Upload Images", "Use Image URLs"])
+    # Custom CSS for better styling
+    st.markdown("""
+        <style>
+        .main {
+            background-color: #f0f2f6;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .stButton>button {
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+        }
+        .stButton>button:hover {
+            background-color: #45a049;
+        }
+        .stTextInput>div>div>input {
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+        .stNumberInput>div>div>input {
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+        .stCheckbox {
+            background-color: white;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+            color: #2c3e50;
+        }
+        .stExpander {
+            background-color: white;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.title("🖼️ Advanced Image Augmentation Tool")
+    st.markdown("Transform your images with a variety of augmentation techniques. Upload images or provide URLs, select your desired augmentations, and download the results in a convenient ZIP file.")
+
+    # Input tabs
+    tab1, tab2 = st.tabs(["📤 Upload Images", "🔗 Use Image URLs"])
     
     with tab1:
-        uploaded_files = st.file_uploader("Choose image files", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
-    
+        uploaded_files = st.file_uploader("Choose image files", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True, help="Upload multiple images in JPG, JPEG, or PNG format.")
+
     with tab2:
-        image_urls = st.text_area("Enter image URLs (one per line)", height=100)
-    
+        image_urls = st.text_area("Enter image URLs (one per line)", height=100, help="Enter URLs of images, one per line. Ensure the URLs are publicly accessible.")
+
+    # Output directory and total augmentations
     save_dir = st.text_input("📂 Output Directory Name", value="augmented_images", 
                             help="This will be the name of the ZIP file containing augmented images")
     
-    num_total_augs = st.number_input("🔢 Total Number of Augmented Images per Input Image", 
-                                   min_value=1, max_value=100, value=15, 
-                                   help="Specify how many augmented images to generate per input image")
-    
-    st.write("### 🎨 Augmentation Options")
-    
-    col1, col2, col3 = st.columns(3)
-    
+    num_total_augs = st.number_input("🔢 Total Number of Augmented Images to Generate", 
+                                   min_value=1, max_value=1000, value=100, 
+                                   help="Total augmented images will be evenly distributed across all input images")
+
+    # Augmentation Options
+    st.markdown("### 🎨 Augmentation Options")
+    col1, col2, col3, col4 = st.columns(4)
+
     with col1:
         st.subheader("Albumentations")
-        use_albumentations = st.checkbox("Use Albumentations Library", value=True)
+        use_albumentations = st.checkbox("Enable Albumentations", value=False, help="Select to enable Albumentations library augmentations.")
     
     with col2:
         st.subheader("Keras")
-        use_keras = st.checkbox("Use Keras ImageDataGenerator", value=True)
+        use_keras = st.checkbox("Enable Keras", value=False, help="Select to enable Keras ImageDataGenerator augmentations.")
     
     with col3:
         st.subheader("Custom")
-        use_custom = st.checkbox("Use Custom Augmentations", value=True)
+        use_custom = st.checkbox("Enable Custom", value=False, help="Select to enable custom-designed augmentations.")
     
-    with st.expander("🔍 Advanced Augmentation Settings"):
-        st.write("These settings can be expanded in future versions.")
-        intensity = st.select_slider("Augmentation intensity", options=["Low", "Medium", "High"], value="Medium")
-        
+    with col4:
+        st.subheader("Select Augmentations")
+        all_augmentation_options = [
+            "rotate", "horizontal_flip", "vertical_flip", "gauss_noise", "random_gamma",
+            "blur", "random_scale", "shift_scale_rotate", "random_rain", "random_fog",
+            "random_sunflare", "random_shadow", "elastic_transform", "grid_distortion", "clahe",
+            "keras_rotation", "keras_width_shift", "keras_height_shift", "keras_shear",
+            "keras_zoom", "keras_horizontal_flip", "keras_brightness", "keras_channel_shift",
+            "keras_vertical_flip", "saturation", "brightness", "resizing", "black_white",
+            "perspective", "contrast", "solarize", "posterize", "equalize", "edge_enhance",
+            "sharpen", "emboss", "jpeg_compression", "pixelate", "random_crop", "median_blur",
+            "salt_pepper_noise", "fog", "rain", "snow", "shear", "random_erase", "cutout", "sunflare"
+        ]
+        selected_augs = []
+        with st.expander("Choose Augmentation Types", expanded=True):
+            st.markdown("**Select specific augmentations to apply:**")
+            for aug in all_augmentation_options:
+                if st.checkbox(aug.replace("keras_", "").capitalize(), key=f"aug_{aug}"):
+                    selected_augs.append(aug)
+
+    # Advanced Settings
+    with st.expander("🔍 Advanced Settings"):
+        intensity = st.select_slider("Augmentation Intensity", options=["Low", "Medium", "High"], value="Medium", 
+                                   help="Adjust the strength of applied augmentations.")
+
+    # Generate Button
     if st.button("🚀 Generate Augmented Images"):
         temp_dir = save_dir
         create_directories(temp_dir)
@@ -444,13 +525,52 @@ def main():
         if not images_to_process:
             st.error("No valid images found! Please upload images or provide valid URLs.")
             return
+        
+        if not selected_augs:
+            st.error("Please select at least one augmentation type!")
+            return
+
+        # Distribute augmentations
+        num_images = len(images_to_process)
+        augs_per_image = max(1, num_total_augs // num_images) if num_images > 0 else num_total_augs
+        
+        # Categorize selected augmentations
+        alb_augs = [aug for aug in selected_augs if aug in [
+            "rotate", "horizontal_flip", "vertical_flip", "gauss_noise", "random_gamma",
+            "blur", "random_scale", "shift_scale_rotate", "random_rain", "random_fog",
+            "random_sunflare", "random_shadow", "elastic_transform", "grid_distortion", "clahe"
+        ]]
+        keras_augs = [aug for aug in selected_augs if aug in [
+            "keras_rotation", "keras_width_shift", "keras_height_shift", "keras_shear",
+            "keras_zoom", "keras_horizontal_flip", "keras_brightness", "keras_channel_shift",
+            "keras_vertical_flip"
+        ]]
+        custom_augs = [aug for aug in selected_augs if aug in [
+            "saturation", "brightness", "resizing", "black_white", "perspective",
+            "contrast", "solarize", "posterize", "equalize", "edge_enhance",
+            "sharpen", "emboss", "jpeg_compression", "pixelate", "random_crop",
+            "median_blur", "salt_pepper_noise", "fog", "rain", "snow",
+            "shear", "random_erase", "cutout", "sunflare"
+        ]]
+        
+        total_methods = sum([
+            (use_albumentations and alb_augs),
+            (use_keras and keras_augs),
+            (use_custom and custom_augs)
+        ])
+        
+        if total_methods == 0:
+            st.error("Please enable at least one augmentation method with selected types!")
+            return
             
+        augs_per_method = max(1, augs_per_image // total_methods) if total_methods > 0 else augs_per_image
+
         for idx, (image, image_name) in enumerate(images_to_process):
             image_folder = os.path.join(temp_dir, f"image_{idx+1}_{image_name.split('.')[0]}")
             create_directories(image_folder)
             
-            st.write(f"### Processing Image: {image_name}")
-            st.image(image, caption=f"Original Image", width=300)
+            st.markdown(f"### Processing Image: {image_name}")
+            st.image(image, caption="Original Image", width=300)
             
             original_path = os.path.join(image_folder, f"original_{image_name}")
             image.save(original_path)
@@ -459,59 +579,54 @@ def main():
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            total_methods = sum([use_albumentations, use_keras, use_custom])
-            if total_methods == 0:
-                st.error("Please select at least one augmentation method!")
-                return
-                
-            augs_per_method = max(1, num_total_augs // total_methods)
             current_method = 0
             
-            if use_albumentations:
-                status_text.text("Applying Albumentations augmentations...")
-                alb_results = augment_with_albumentations(image, image_folder, num_augs=augs_per_method)
+            if use_albumentations and alb_augs:
+                status_text.text("Applying Albumentations...")
+                alb_results = augment_with_albumentations(image, image_folder, selected_augs=alb_augs)
                 all_augmented.extend(alb_results)
                 current_method += 1
                 progress_bar.progress(current_method / total_methods)
             
-            if use_keras:
+            if use_keras and keras_augs:
                 status_text.text("Applying Keras augmentations...")
-                keras_results = augment_with_keras(image, image_folder, num_augs=augs_per_method)
+                keras_results = augment_with_keras(image, image_folder, num_augs=augs_per_method, selected_augs=keras_augs)
                 all_augmented.extend(keras_results)
                 current_method += 1
                 progress_bar.progress(current_method / total_methods)
             
-            if use_custom:
+            if use_custom and custom_augs:
                 status_text.text("Applying custom augmentations...")
-                custom_results = apply_custom_augmentations(image, image_folder, num_augs=augs_per_method)
+                custom_results = apply_custom_augmentations(image, image_folder, selected_augs=custom_augs)
                 all_augmented.extend(custom_results)
                 current_method += 1
                 progress_bar.progress(current_method / total_methods)
             
             progress_bar.progress(1.0)
-            status_text.success(f"Successfully generated {len(all_augmented)} augmented images!")
+            status_text.success(f"Generated {len(all_augmented)} augmented images for {image_name}!")
             
             if all_augmented:
-                st.write(f"#### Sample of Augmented Images")
+                st.markdown("#### Sample of Augmented Images")
                 sample_size = min(12, len(all_augmented))
                 sample_augmentations = random.sample(all_augmented, sample_size)
                 
                 cols = st.columns(3)
                 for i, (aug_name, aug_img, _) in enumerate(sample_augmentations):
-                    cols[i % 3].image(aug_img, caption=f"{aug_name}", width=200)
+                    cols[i % 3].image(aug_img, caption=aug_name.replace("keras_", "").capitalize(), width=200)
                 
-                st.success(f"All augmented images for {image_name} saved to: {image_folder}")
+                st.success(f"Augmented images for {image_name} saved to: {image_folder}")
             else:
-                st.warning("No augmentations were generated. Please check your settings.")
+                st.warning("No augmentations generated for this image. Check your settings.")
         
         zip_content = create_zip_from_folder(temp_dir)
         st.balloons()
-        st.success(f"✅ All images processed successfully!")
+        st.success("✅ All images processed successfully!")
         st.download_button(
             label="📥 Download Augmented Images",
             data=zip_content,
             file_name=f"{save_dir}.zip",
-            mime="application/zip"
+            mime="application/zip",
+            help="Download all augmented images as a ZIP file."
         )
 
 if __name__ == "__main__":
