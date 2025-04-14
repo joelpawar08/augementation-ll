@@ -6,6 +6,7 @@ import math
 import io
 import requests
 import uuid
+import zipfile
 from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 import streamlit as st
 import albumentations as A
@@ -32,28 +33,24 @@ def load_image_from_url(url):
 def save_image(image, save_path):
     """Save an image to the specified path"""
     try:
-        # Convert to PIL Image if it's a numpy array
         if isinstance(image, np.ndarray):
             if image.ndim == 3 and image.shape[2] == 3:
                 image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             else:
                 image = Image.fromarray(image)
                 
-        # Save the image
         if hasattr(image, 'mode') and image.mode == "L":
             image.save(save_path)
         else:
             try:
                 image.convert("RGB").save(save_path)
             except Exception:
-                # Fallback for cases where direct conversion fails
                 Image.fromarray(np.array(image)).save(save_path)
         return True
     except Exception as e:
         st.error(f"Error saving image: {e}")
         return False
 
-# ===== Albumentations Augmentations =====
 def augment_with_albumentations(image, save_dir, prefix="alb"):
     """Apply augmentations using Albumentations library"""
     if isinstance(image, Image.Image):
@@ -66,7 +63,6 @@ def augment_with_albumentations(image, save_dir, prefix="alb"):
     elif image_np.shape[2] == 4:
         image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
         
-    # Convert to BGR for OpenCV functions
     image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
     
     augmentations = [
@@ -104,7 +100,6 @@ def augment_with_albumentations(image, save_dir, prefix="alb"):
     
     return augmented_images
 
-# ===== Keras Augmentations =====
 def augment_with_keras(image, save_dir, prefix="keras"):
     """Apply augmentations using Keras ImageDataGenerator"""
     try:
@@ -138,7 +133,7 @@ def augment_with_keras(image, save_dir, prefix="keras"):
 
         augmented_images = []
         for i, batch in enumerate(datagen.flow(x, batch_size=1)):
-            if i >= 10:  # Generate 10 different augmentations using Keras
+            if i >= 10:
                 break
                 
             augmented_img = batch[0].astype(np.uint8)
@@ -153,7 +148,6 @@ def augment_with_keras(image, save_dir, prefix="keras"):
         st.error(f"Failed to apply Keras augmentations: {e}")
         return []
 
-# ===== Custom PIL and OpenCV Augmentations =====
 def add_gaussian_noise(image, mean=0, sigma=25):
     """Add Gaussian noise to an OpenCV image"""
     noise = np.random.normal(mean, sigma, image.shape).astype(np.uint8)
@@ -228,7 +222,6 @@ def add_sunflare(image, num_flare_circles=8, threshold=200, flare_center=None):
     if flare_center is None:
         flare_center = (random.randint(0, w), random.randint(0, h // 2))
         
-    # Add circle flares
     for i in range(num_flare_circles):
         flare_size = random.randint(10, 30)
         dx = random.randint(-50, 50)
@@ -236,7 +229,6 @@ def add_sunflare(image, num_flare_circles=8, threshold=200, flare_center=None):
         x = min(max(flare_center[0] + dx, 0), w - 1)
         y = min(max(flare_center[1] + dy, 0), h - 1)
         
-        # Draw the flare
         cv2.circle(
             result, 
             (x, y), 
@@ -245,12 +237,10 @@ def add_sunflare(image, num_flare_circles=8, threshold=200, flare_center=None):
             -1
         )
     
-    # Add overall brightness
     brightness_mask = np.zeros((h, w), dtype=np.float32)
     cv2.circle(brightness_mask, flare_center, min(h, w) // 2, 1.0, -1)
     brightness_mask = cv2.GaussianBlur(brightness_mask, (51, 51), 0)
     
-    # Apply brightness mask
     for i in range(3):
         result[:,:,i] = np.clip(result[:,:,i] + brightness_mask * 50, 0, 255)
     
@@ -278,25 +268,20 @@ def compress_jpeg(image, quality_range=(10, 30)):
     return Image.open(buffer)
 
 def apply_custom_augmentations(image, save_dir, prefix="custom"):
-    """Apply custom augmentations (from second code)"""
+    """Apply custom augmentations"""
     augmented_images = []
     
     if isinstance(image, np.ndarray):
-        # Convert from numpy to PIL for PIL operations
         pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if image.shape[-1] == 3 else image)
-        # Convert from numpy to OpenCV format for OpenCV operations
         cv_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if image.shape[-1] == 3 else image
     elif isinstance(image, Image.Image):
         pil_image = image
-        # Convert PIL to OpenCV
         cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     else:
         st.error("Unsupported image format for custom augmentations")
         return []
     
-    # Dictionary of augmentation functions
     augmentation_functions = {
-        # PIL image functions
         "saturation": lambda img: (ImageEnhance.Color(img).enhance(random.uniform(0.5, 2.5)), "pil"),
         "brightness": lambda img: (ImageEnhance.Brightness(img).enhance(random.uniform(1.5, 4.5)), "pil"),
         "rotation": lambda img: (img.rotate(random.choice([90, 180, 270])), "pil"),
@@ -333,8 +318,6 @@ def apply_custom_augmentations(image, save_dir, prefix="custom"):
             random.randint(img.width * 3 // 4, img.width),
             random.randint(img.height * 3 // 4, img.height)
         )), "pil"),
-        
-        # OpenCV image functions
         "blur": lambda img: (cv2.GaussianBlur(img, (35, 35), 0), "cv"),
         "median_blur": lambda img: (cv2.medianBlur(img, ksize=random.choice([9, 14, 18])), "cv"),
         "gaussian_noise": lambda img: (add_gaussian_noise(img), "cv"),
@@ -344,7 +327,6 @@ def apply_custom_augmentations(image, save_dir, prefix="custom"):
         "snow": lambda img: (add_snow(img), "cv"),
     }
 
-    # Convert formats functions (these require special handling)
     special_functions = {
         "shear": lambda: Image.fromarray(cv2.cvtColor(
             np.array(random_shear(np.array(pil_image), intensity=random.uniform(0.2, 0.5), 
@@ -355,27 +337,19 @@ def apply_custom_augmentations(image, save_dir, prefix="custom"):
         "sunflare": lambda: Image.fromarray(add_sunflare(np.array(pil_image)))
     }
 
-    # Apply standard augmentations
     for aug_name, aug_func in augmentation_functions.items():
         try:
-            # Choose the right image format for the function
             img_to_use = pil_image if aug_func("dummy")[1] == "pil" else cv_image
-            
-            # Apply augmentation
             aug_result, _ = aug_func(img_to_use)
             
-            # Convert result to PIL if it's OpenCV
             if _ == "cv":
                 aug_result = Image.fromarray(cv2.cvtColor(aug_result, cv2.COLOR_BGR2RGB))
                 
-            # Generate a unique filename
             unique_id = random.randint(100000, 999999)
             save_path = os.path.join(save_dir, f"{prefix}_{aug_name}_{unique_id}.jpg")
             
-            # Save image
             aug_result.save(save_path)
             
-            # Add to results list
             if _ == "pil":
                 aug_result_np = np.array(aug_result)
             else:
@@ -386,19 +360,12 @@ def apply_custom_augmentations(image, save_dir, prefix="custom"):
         except Exception as e:
             st.warning(f"Skipping {aug_name}: {str(e)}")
     
-    # Apply special functions
     for aug_name, aug_func in special_functions.items():
         try:
             aug_result = aug_func()
-            
-            # Generate a unique filename
             unique_id = random.randint(100000, 999999)
             save_path = os.path.join(save_dir, f"{prefix}_{aug_name}_{unique_id}.jpg")
-            
-            # Save image
             aug_result.save(save_path)
-            
-            # Add to results list
             augmented_images.append((aug_name, np.array(aug_result), save_path))
             
         except Exception as e:
@@ -406,12 +373,23 @@ def apply_custom_augmentations(image, save_dir, prefix="custom"):
     
     return augmented_images
 
+def create_zip_from_folder(folder_path, zip_name="augmented_images.zip"):
+    """Create a ZIP file from a folder and return its binary content"""
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(folder_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, folder_path)
+                zf.write(file_path, arcname=arcname)
+    memory_file.seek(0)
+    return memory_file.getvalue()
+
 def main():
     st.set_page_config(page_title="Advanced Image Augmentation Tool", layout="wide")
     st.title("🖼️ Advanced Image Augmentation Tool")
     st.write("Upload an image directly or provide image URLs for comprehensive augmentation")
     
-    # Create tabs for different input methods
     tab1, tab2 = st.tabs(["Upload Images", "Use Image URLs"])
     
     with tab1:
@@ -420,14 +398,11 @@ def main():
     with tab2:
         image_urls = st.text_area("Enter image URLs (one per line)", height=100)
     
-    # Output directory
-    save_dir = st.text_input("📂 Output Directory", value="augmented_images", 
-                            help="The directory where augmented images will be saved")
+    save_dir = st.text_input("📂 Output Directory Name", value="augmented_images", 
+                            help="This will be the name of the ZIP file containing augmented images")
     
-    # Augmentation options
     st.write("### 🎨 Augmentation Options")
     
-    # Create columns for the checkboxes
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -442,19 +417,15 @@ def main():
         st.subheader("Custom")
         use_custom = st.checkbox("Use Custom Augmentations", value=True)
     
-    # Detailed augmentation options
     with st.expander("🔍 Advanced Augmentation Settings"):
-        # These options could be used in the future to fine-tune the augmentations
         st.write("These settings can be expanded in future versions.")
         num_augmentations = st.slider("Number of augmentations per method", 1, 20, 10)
         intensity = st.select_slider("Augmentation intensity", options=["Low", "Medium", "High"], value="Medium")
         
-    # Process when button is clicked
     if st.button("🚀 Generate Augmented Images"):
-        # Create output directory
-        create_directories(save_dir)
+        temp_dir = save_dir
+        create_directories(temp_dir)
         
-        # Process images from uploads
         images_to_process = []
         
         if uploaded_files:
@@ -468,13 +439,11 @@ def main():
                 except Exception as e:
                     st.error(f"Error processing {file.name}: {e}")
         
-        # Process images from URLs
         if image_urls:
             for url in image_urls.strip().split('\n'):
                 if url.strip():
                     img = load_image_from_url(url)
                     if img:
-                        # Extract filename from URL or use a random name
                         image_name = os.path.basename(url.split('?')[0]) or f"image_{uuid.uuid4().hex[:8]}.jpg"
                         images_to_process.append((img, image_name))
         
@@ -482,26 +451,20 @@ def main():
             st.error("No valid images found! Please upload images or provide valid URLs.")
             return
             
-        # Process each image
         for idx, (image, image_name) in enumerate(images_to_process):
-            # Create a folder for this image
-            image_folder = os.path.join(save_dir, f"image_{idx+1}_{image_name.split('.')[0]}")
+            image_folder = os.path.join(temp_dir, f"image_{idx+1}_{image_name.split('.')[0]}")
             create_directories(image_folder)
             
-            # Display the original image
             st.write(f"### Processing Image: {image_name}")
             st.image(image, caption=f"Original Image", width=300)
             
-            # Save original image
             original_path = os.path.join(image_folder, f"original_{image_name}")
             image.save(original_path)
             
-            # Apply augmentations
             all_augmented = []
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # Counter for tracking progress
             total_methods = sum([use_albumentations, use_keras, use_custom])
             current_method = 0
             
@@ -526,31 +489,31 @@ def main():
                 current_method += 1
                 progress_bar.progress(current_method / total_methods)
             
-            # Display results
             progress_bar.progress(1.0)
             status_text.success(f"Successfully generated {len(all_augmented)} augmented images!")
             
-            # Display some of the augmented images
             if all_augmented:
                 st.write(f"#### Sample of Augmented Images")
-                
-                # Display a sample of the augmented images (up to 12)
                 sample_size = min(12, len(all_augmented))
                 sample_augmentations = random.sample(all_augmented, sample_size)
                 
-                # Create a 3-column layout
                 cols = st.columns(3)
                 for i, (aug_name, aug_img, _) in enumerate(sample_augmentations):
                     cols[i % 3].image(aug_img, caption=f"{aug_name}", width=200)
                 
-                # Show output directory
                 st.success(f"All augmented images for {image_name} saved to: {image_folder}")
             else:
                 st.warning("No augmentations were generated. Please check your settings.")
         
-        # Final success message
+        zip_content = create_zip_from_folder(temp_dir)
         st.balloons()
-        st.success(f"✅ All images processed successfully! Find your augmented images in the '{save_dir}' directory.")
+        st.success(f"✅ All images processed successfully!")
+        st.download_button(
+            label="📥 Download Augmented Images",
+            data=zip_content,
+            file_name=f"{save_dir}.zip",
+            mime="application/zip"
+        )
 
 if __name__ == "__main__":
     main()
