@@ -51,7 +51,7 @@ def save_image(image, save_path):
         st.error(f"Error saving image: {e}")
         return False
 
-def augment_with_albumentations(image, save_dir, prefix="alb"):
+def augment_with_albumentations(image, save_dir, prefix="alb", num_augs=5):
     """Apply augmentations using Albumentations library"""
     if isinstance(image, Image.Image):
         image_np = np.array(image)
@@ -84,8 +84,9 @@ def augment_with_albumentations(image, save_dir, prefix="alb"):
     ]
     
     augmented_images = []
+    selected_augs = random.sample(augmentations, min(num_augs, len(augmentations)))
     
-    for name, transform in augmentations:
+    for name, transform in selected_augs:
         try:
             augmented = transform(image=image_cv)['image']
             augmented_rgb = cv2.cvtColor(augmented, cv2.COLOR_BGR2RGB)
@@ -100,7 +101,7 @@ def augment_with_albumentations(image, save_dir, prefix="alb"):
     
     return augmented_images
 
-def augment_with_keras(image, save_dir, prefix="keras"):
+def augment_with_keras(image, save_dir, prefix="keras", num_augs=5):
     """Apply augmentations using Keras ImageDataGenerator"""
     try:
         if isinstance(image, Image.Image):
@@ -133,7 +134,7 @@ def augment_with_keras(image, save_dir, prefix="keras"):
 
         augmented_images = []
         for i, batch in enumerate(datagen.flow(x, batch_size=1)):
-            if i >= 10:
+            if i >= num_augs:
                 break
                 
             augmented_img = batch[0].astype(np.uint8)
@@ -267,7 +268,7 @@ def compress_jpeg(image, quality_range=(10, 30)):
     buffer.seek(0)
     return Image.open(buffer)
 
-def apply_custom_augmentations(image, save_dir, prefix="custom"):
+def apply_custom_augmentations(image, save_dir, prefix="custom", num_augs=5):
     """Apply custom augmentations"""
     augmented_images = []
     
@@ -337,36 +338,26 @@ def apply_custom_augmentations(image, save_dir, prefix="custom"):
         "sunflare": lambda: Image.fromarray(add_sunflare(np.array(pil_image)))
     }
 
-    for aug_name, aug_func in augmentation_functions.items():
+    all_augs = list(augmentation_functions.items()) + list(special_functions.items())
+    selected_augs = random.sample(all_augs, min(num_augs, len(all_augs)))
+
+    for aug_name, aug_func in selected_augs:
         try:
-            img_to_use = pil_image if aug_func("dummy")[1] == "pil" else cv_image
-            aug_result, _ = aug_func(img_to_use)
-            
-            if _ == "cv":
-                aug_result = Image.fromarray(cv2.cvtColor(aug_result, cv2.COLOR_BGR2RGB))
-                
-            unique_id = random.randint(100000, 999999)
-            save_path = os.path.join(save_dir, f"{prefix}_{aug_name}_{unique_id}.jpg")
-            
-            aug_result.save(save_path)
-            
-            if _ == "pil":
+            if aug_name in special_functions:
+                aug_result = aug_func()
                 aug_result_np = np.array(aug_result)
             else:
-                aug_result_np = cv2.cvtColor(aug_result, cv2.COLOR_BGR2RGB)
+                img_to_use = pil_image if aug_func("dummy")[1] == "pil" else cv_image
+                aug_result, _ = aug_func(img_to_use)
+                if _ == "cv":
+                    aug_result = Image.fromarray(cv2.cvtColor(aug_result, cv2.COLOR_BGR2RGB))
+                aug_result_np = np.array(aug_result)
                 
-            augmented_images.append((aug_name, aug_result_np, save_path))
-            
-        except Exception as e:
-            st.warning(f"Skipping {aug_name}: {str(e)}")
-    
-    for aug_name, aug_func in special_functions.items():
-        try:
-            aug_result = aug_func()
             unique_id = random.randint(100000, 999999)
             save_path = os.path.join(save_dir, f"{prefix}_{aug_name}_{unique_id}.jpg")
+            
             aug_result.save(save_path)
-            augmented_images.append((aug_name, np.array(aug_result), save_path))
+            augmented_images.append((aug_name, aug_result_np, save_path))
             
         except Exception as e:
             st.warning(f"Skipping {aug_name}: {str(e)}")
@@ -401,6 +392,10 @@ def main():
     save_dir = st.text_input("📂 Output Directory Name", value="augmented_images", 
                             help="This will be the name of the ZIP file containing augmented images")
     
+    num_total_augs = st.number_input("🔢 Total Number of Augmented Images per Input Image", 
+                                   min_value=1, max_value=100, value=15, 
+                                   help="Specify how many augmented images to generate per input image")
+    
     st.write("### 🎨 Augmentation Options")
     
     col1, col2, col3 = st.columns(3)
@@ -419,7 +414,6 @@ def main():
     
     with st.expander("🔍 Advanced Augmentation Settings"):
         st.write("These settings can be expanded in future versions.")
-        num_augmentations = st.slider("Number of augmentations per method", 1, 20, 10)
         intensity = st.select_slider("Augmentation intensity", options=["Low", "Medium", "High"], value="Medium")
         
     if st.button("🚀 Generate Augmented Images"):
@@ -466,25 +460,30 @@ def main():
             status_text = st.empty()
             
             total_methods = sum([use_albumentations, use_keras, use_custom])
+            if total_methods == 0:
+                st.error("Please select at least one augmentation method!")
+                return
+                
+            augs_per_method = max(1, num_total_augs // total_methods)
             current_method = 0
             
             if use_albumentations:
                 status_text.text("Applying Albumentations augmentations...")
-                alb_results = augment_with_albumentations(image, image_folder)
+                alb_results = augment_with_albumentations(image, image_folder, num_augs=augs_per_method)
                 all_augmented.extend(alb_results)
                 current_method += 1
                 progress_bar.progress(current_method / total_methods)
             
             if use_keras:
                 status_text.text("Applying Keras augmentations...")
-                keras_results = augment_with_keras(image, image_folder)
+                keras_results = augment_with_keras(image, image_folder, num_augs=augs_per_method)
                 all_augmented.extend(keras_results)
                 current_method += 1
                 progress_bar.progress(current_method / total_methods)
             
             if use_custom:
                 status_text.text("Applying custom augmentations...")
-                custom_results = apply_custom_augmentations(image, image_folder)
+                custom_results = apply_custom_augmentations(image, image_folder, num_augs=augs_per_method)
                 all_augmented.extend(custom_results)
                 current_method += 1
                 progress_bar.progress(current_method / total_methods)
